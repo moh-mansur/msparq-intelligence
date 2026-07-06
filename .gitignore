@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.pkl
+*.db
+.DS_Store
+ontology/*.owx
+ml_models/*.pkl
