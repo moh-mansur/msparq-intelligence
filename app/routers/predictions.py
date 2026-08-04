@@ -5,6 +5,9 @@ from app.services.feature_extraction import extract_student_features
 from app.ml.risk_predictor import RiskPredictor
 from app.models.student_features import SchoolRiskSummary, RiskPrediction
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 predictor = RiskPredictor()
@@ -60,6 +63,7 @@ async def get_school_predictions(
         )
 
     except Exception as e:
+        logger.exception("School prediction failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -93,4 +97,5 @@ async def get_student_prediction(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Student prediction failed")
         raise HTTPException(status_code=500, detail=str(e))
