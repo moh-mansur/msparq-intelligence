@@ -230,20 +230,20 @@ def apply_swrl_rules(
         )
         risk_points += 1.0
     
-    # ── RULE 4: Assignment Completion ─────────────────────────────
-    # Student(?s) ∧ hasAssignmentCompletionRate(?s, ?cr) ∧ lessThan(?cr, 60)
+    # ── RULE 4: Assessment Activity ─────────────────────────────
+    # Student(?s) ∧ hasAssessmentActivityRate(?s, ?cr) ∧ lessThan(?cr, 60)
     # → hasRisk(?s, MediumRisk) ∧ requiresIntervention(?s, ParentMeeting)
     if features.assignment_completion_rate < t["completion_high_risk"]:
         risk_factors.append(
-            f"Very low assignment completion: "
-            f"{features.assignment_completion_rate:.1f}% of assignments submitted"
+            f"Very low assessment activity: "
+            f"{features.assignment_completion_rate:.1f}% of expected assessments completed"
         )
         interventions.add("ParentMeeting")
         risk_points += 2.0
     
     elif features.assignment_completion_rate < t["completion_medium_risk"]:
         risk_factors.append(
-            f"Low assignment completion rate: "
+            f"Low assessment activity rate: "
             f"{features.assignment_completion_rate:.1f}%"
         )
         risk_points += 1.0

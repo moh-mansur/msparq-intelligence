@@ -27,61 +27,105 @@ async def extract_student_features(
             s.class_id,
 
             -- Attendance Rate
-            COALESCE(
-                ROUND(
-                    100.0 * COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END) /
-                    NULLIF(COUNT(DISTINCT a.id), 0)
-                , 2),
-                0
-            ) as attendance_rate,
+            COALESCE(attendance_summary.attendance_rate, 0) as attendance_rate,
 
             -- Average CA Score
-            COALESCE(AVG(r.assignment_score + r.test_score), 0) as average_ca_score,
+            COALESCE(result_summary.average_ca_score, 0) as average_ca_score,
 
             -- Average Exam Score
-            COALESCE(AVG(r.exam_score), 0) as average_exam_score,
+            COALESCE(result_summary.average_exam_score, 0) as average_exam_score,
 
             -- Average Final Score
-            COALESCE(AVG(r.final_score), 0) as average_final_score,
+            COALESCE(result_summary.average_final_score, 0) as average_final_score,
 
-            -- Assignment Completion Rate
-            COALESCE(
-                ROUND(
-                    100.0 * COUNT(DISTINCT sub.id) /
-                    NULLIF(COUNT(DISTINCT asgn.id), 0)
-                , 2),
-                0
-            ) as assignment_completion_rate,
+            -- Assessment Activity Rate
+            COALESCE(activity_summary.assessment_activity_rate, 0) as assignment_completion_rate,
 
             -- Subject Failure Count (final_score < 40)
-            COALESCE(
-                COUNT(DISTINCT CASE WHEN r.final_score < 40 THEN r.subject_id END),
-                0
-            ) as subject_failure_count
+            COALESCE(result_summary.subject_failure_count, 0) as subject_failure_count
 
         FROM students s
         JOIN classes c ON s.class_id = c.id
-        LEFT JOIN attendance a ON a.student_id = s.id
-            AND a.school_id = :school_id
-            AND a.session = :session
-            AND a.term = :term
-        LEFT JOIN results r ON r.student_id = s.id
-            AND r.school_id = :school_id
-            AND r.session = :session
-            AND r.term = :term
-        LEFT JOIN assignments asgn ON asgn.class_id = s.class_id
-            AND asgn.school_id = :school_id
-            AND asgn.term = :term
-            AND asgn.session = :session
-        LEFT JOIN submissions sub ON sub.assignment_id = asgn.id
-            AND sub.student_id = s.id
+        LEFT JOIN LATERAL (
+            SELECT
+                ROUND(
+                    100.0 * COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END) /
+                    NULLIF(COUNT(DISTINCT a.id), 0)
+                , 2) as attendance_rate
+            FROM attendance a
+            WHERE a.student_id = s.id
+                AND a.school_id = :school_id
+                AND a.session = :session
+                AND a.term = :term
+        ) attendance_summary ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                AVG(r.assignment_score + r.test_score) as average_ca_score,
+                AVG(r.exam_score) as average_exam_score,
+                AVG(r.final_score) as average_final_score,
+                COUNT(DISTINCT CASE WHEN r.final_score < 40 THEN r.subject_id END) as subject_failure_count
+            FROM results r
+            WHERE r.student_id = s.id
+                AND r.school_id = :school_id
+                AND r.session = :session
+                AND r.term = :term
+        ) result_summary ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                ROUND(
+                    100.0 * (activity_counts.completed_lms_assignments + activity_counts.completed_assessments) /
+                    NULLIF(activity_counts.total_lms_assignments + activity_counts.total_assessments, 0)
+                , 2) as assessment_activity_rate
+            FROM (
+                SELECT
+                    (
+                        SELECT COUNT(DISTINCT asgn.id)
+                        FROM assignments asgn
+                        WHERE asgn.class_id = s.class_id
+                            AND asgn.school_id = :school_id
+                            AND asgn.term = :term
+                            AND asgn.session = :session
+                    ) as total_lms_assignments,
+                    (
+                        SELECT COUNT(DISTINCT sub.assignment_id)
+                        FROM submissions sub
+                        JOIN assignments asgn ON asgn.id = sub.assignment_id
+                        WHERE asgn.class_id = s.class_id
+                            AND asgn.school_id = :school_id
+                            AND asgn.term = :term
+                            AND asgn.session = :session
+                            AND sub.student_id = s.id
+                            AND sub.status IN ('SUBMITTED', 'RESUBMITTED', 'GRADED')
+                    ) as completed_lms_assignments,
+                    (
+                        SELECT COUNT(DISTINCT asm.id)
+                        FROM assessments asm
+                        WHERE asm.class_id = s.class_id
+                            AND asm.school_id = :school_id
+                            AND asm.term = :term
+                            AND asm.session = :session
+                            AND asm.category <> 'EXAM'
+                            AND (asm.class_group_id IS NULL OR asm.class_group_id = s.class_group_id)
+                    ) as total_assessments,
+                    (
+                        SELECT COUNT(DISTINCT score.assessment_id)
+                        FROM assessment_scores score
+                        JOIN assessments asm ON asm.id = score.assessment_id
+                        WHERE asm.class_id = s.class_id
+                            AND asm.school_id = :school_id
+                            AND asm.term = :term
+                            AND asm.session = :session
+                            AND asm.category <> 'EXAM'
+                            AND (asm.class_group_id IS NULL OR asm.class_group_id = s.class_group_id)
+                            AND score.student_id = s.id
+                    ) as completed_assessments
+            ) activity_counts
+        ) activity_summary ON TRUE
         WHERE s.school_id = :school_id
             AND s.archived_at IS NULL
             {class_filter}
-        GROUP BY s.id, s.school_id, s.first_name, s.last_name, c.name, s.class_id
         ORDER BY c.name, s.last_name
     """)
-
     params = {
         "school_id": school_id,
         "session": session,
