@@ -73,8 +73,8 @@ async def extract_student_features(
         LEFT JOIN LATERAL (
             SELECT
                 ROUND(
-                    100.0 * (activity_counts.completed_lms_assignments + activity_counts.completed_assessments) /
-                    NULLIF(activity_counts.total_lms_assignments + activity_counts.total_assessments, 0)
+                    100.0 * (activity_counts.completed_lms_assignments + activity_counts.completed_assessments + activity_counts.result_activity_count) /
+                    NULLIF(activity_counts.total_lms_assignments + activity_counts.total_assessments + activity_counts.result_activity_count, 0)
                 , 2) as assessment_activity_rate
             FROM (
                 SELECT
@@ -105,7 +105,16 @@ async def extract_student_features(
                             AND asm.term = :term
                             AND asm.session = :session
                             AND asm.category <> 'EXAM'
-                            AND (asm.class_group_id IS NULL OR asm.class_group_id = s.class_group_id)
+                            AND (
+                                asm.class_group_id IS NULL
+                                OR asm.class_group_id = s.class_group_id
+                                OR EXISTS (
+                                    SELECT 1
+                                    FROM assessment_scores existing_score
+                                    WHERE existing_score.assessment_id = asm.id
+                                        AND existing_score.student_id = s.id
+                                )
+                            )
                     ) as total_assessments,
                     (
                         SELECT COUNT(DISTINCT score.assessment_id)
@@ -116,9 +125,18 @@ async def extract_student_features(
                             AND asm.term = :term
                             AND asm.session = :session
                             AND asm.category <> 'EXAM'
-                            AND (asm.class_group_id IS NULL OR asm.class_group_id = s.class_group_id)
                             AND score.student_id = s.id
-                    ) as completed_assessments
+                    ) as completed_assessments,
+                    (
+                        SELECT COUNT(DISTINCT r.subject_id)
+                        FROM results r
+                        WHERE r.student_id = s.id
+                            AND r.school_id = :school_id
+                            AND r.session = :session
+                            AND r.term = :term
+                            AND r.class_id = s.class_id
+                            AND (r.assignment_score + r.test_score) > 0
+                    ) as result_activity_count
             ) activity_counts
         ) activity_summary ON TRUE
         WHERE s.school_id = :school_id
