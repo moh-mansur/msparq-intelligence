@@ -1,0 +1,52 @@
+# Keeps the prediction service awake during school hours.
+#
+# Render puts a free service to sleep after roughly fifteen minutes with no
+# traffic, and waking it takes about thirty seconds. The school app waits ten
+# seconds and retries once, so the first person to open the intelligence page
+# each morning waited twenty seconds and was then told the service was not
+# ready. A request every few minutes keeps it up.
+#
+# Only on weekday school hours, deliberately. A free Render account gets 750
+# instance-hours a month; awake around the clock is about 730 of them, the
+# whole allowance on this one service. This schedule is roughly 250, so the
+# service is up whenever anyone is at school and asleep when nobody is - and
+# the app falls back to the last reading while it wakes.
+#
+# GitHub runs schedules in UTC and can delay them by several minutes when its
+# queues are busy. Lagos is UTC+1 all year, and the five minute interval gives
+# the fifteen minute sleep window room to absorb a late run.
+
+name: Keep prediction service awake
+
+on:
+  schedule:
+    # Every 5 minutes, 05:00-17:59 UTC = 06:00-18:59 Lagos, Monday to Friday.
+    - cron: '*/5 5-17 * * 1-5'
+  # Lets you run it by hand from the Actions tab to check it works.
+  workflow_dispatch:
+
+# Nothing in the repository is read or written; the job only makes a request.
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the health endpoint
+        env:
+          HEALTH_URL: ${{ secrets.INTELLIGENCE_HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "INTELLIGENCE_HEALTH_URL is not set."
+            echo "Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          # A sleeping service takes about thirty seconds to answer, so allow
+          # a generous timeout and retry rather than calling it a failure.
+          curl --fail --silent --show-error \
+            --max-time 90 \
+            --retry 3 --retry-delay 20 --retry-connrefused \
+            --output /dev/null \
+            --write-out 'status %{http_code} in %{time_total}s\n' \
+            "$HEALTH_URL"
