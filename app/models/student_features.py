@@ -17,6 +17,20 @@ class StudentFeatures(BaseModel):
     score_trend: float  # positive = improving, negative = declining
     attendance_trend: float  # positive = improving, negative = declining
 
+    # How much evidence sits behind the rates above.
+    #
+    # Every rate is COALESCEd to 0 when there is nothing to average, so a 0
+    # means either "scored nothing" or "nothing has been entered yet" - and the
+    # rules cannot tell those apart without these counts. A pupil whose teacher
+    # has not entered marks yet must not read as a pupil who scored zero.
+    #
+    # Defaulted so an older caller constructing StudentFeatures by hand still
+    # works; the extractor always sets them.
+    attendance_days_recorded: int = 0
+    result_count: int = 0
+    assessment_activity_total: int = 0
+    has_previous_term: bool = False
+
 class RiskPrediction(BaseModel):
     student_id: str
     student_name: str

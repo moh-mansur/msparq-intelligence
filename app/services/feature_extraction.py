@@ -42,7 +42,14 @@ async def extract_student_features(
             COALESCE(activity_summary.assessment_activity_rate, 0) as assignment_completion_rate,
 
             -- Subject Failure Count (final_score < 40)
-            COALESCE(result_summary.subject_failure_count, 0) as subject_failure_count
+            COALESCE(result_summary.subject_failure_count, 0) as subject_failure_count,
+
+            -- How much evidence is behind each rate above. Every rate is
+            -- COALESCEd to 0, so without these a pupil with nothing entered
+            -- yet is indistinguishable from a pupil who scored nothing.
+            COALESCE(attendance_summary.days_recorded, 0) as attendance_days_recorded,
+            COALESCE(result_summary.result_count, 0) as result_count,
+            COALESCE(activity_summary.activity_total, 0) as assessment_activity_total
 
         FROM students s
         JOIN classes c ON s.class_id = c.id
@@ -51,7 +58,8 @@ async def extract_student_features(
                 ROUND(
                     100.0 * COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END) /
                     NULLIF(COUNT(DISTINCT a.id), 0)
-                , 2) as attendance_rate
+                , 2) as attendance_rate,
+                COUNT(DISTINCT a.id) as days_recorded
             FROM attendance a
             WHERE a.student_id = s.id
                 AND a.school_id = :school_id
@@ -63,7 +71,8 @@ async def extract_student_features(
                 AVG(r.assignment_score + r.test_score) as average_ca_score,
                 AVG(r.exam_score) as average_exam_score,
                 AVG(r.final_score) as average_final_score,
-                COUNT(DISTINCT CASE WHEN r.final_score < 40 THEN r.subject_id END) as subject_failure_count
+                COUNT(DISTINCT CASE WHEN r.final_score < 40 THEN r.subject_id END) as subject_failure_count,
+                COUNT(DISTINCT r.subject_id) as result_count
             FROM results r
             WHERE r.student_id = s.id
                 AND r.school_id = :school_id
@@ -75,7 +84,8 @@ async def extract_student_features(
                 ROUND(
                     100.0 * (activity_counts.completed_lms_assignments + activity_counts.completed_assessments + activity_counts.result_activity_count) /
                     NULLIF(activity_counts.total_lms_assignments + activity_counts.total_assessments + activity_counts.result_activity_count, 0)
-                , 2) as assessment_activity_rate
+                , 2) as assessment_activity_rate,
+                (activity_counts.total_lms_assignments + activity_counts.total_assessments + activity_counts.result_activity_count) as activity_total
             FROM (
                 SELECT
                     (
@@ -190,6 +200,10 @@ async def extract_student_features(
             subject_failure_count=int(row.subject_failure_count),
             score_trend=score_trend,
             attendance_trend=attendance_trend,
+            attendance_days_recorded=int(row.attendance_days_recorded),
+            result_count=int(row.result_count),
+            assessment_activity_total=int(row.assessment_activity_total),
+            has_previous_term=student_id in prev_term_map,
         ))
 
     return features
