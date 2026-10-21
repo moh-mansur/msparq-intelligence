@@ -171,13 +171,33 @@ def apply_swrl_rules(
     recommendations = []
     interventions = set()
     risk_points = 0.0
-    
+
     t = thresholds
-    
+
+    # ── WHAT WE ACTUALLY KNOW ─────────────────────────────────────
+    # Every rate arrives COALESCEd to 0, so an absent register and a pupil who
+    # was never present both read 0.0%, and no marks entered and a pupil who
+    # scored nothing both read 0.0 average. A rule fired on absent data is not
+    # a cautious rule, it is a wrong one: it told teachers a pupil was at
+    # critical academic risk with "0.0% average final score" before anyone had
+    # entered a single mark. Each rule below only fires on evidence that exists.
+    has_attendance = features.attendance_days_recorded > 0
+    has_results = features.result_count > 0
+    has_activity = features.assessment_activity_total > 0
+    # A trend needs a reading at both ends. Without this term's results
+    # the average is 0 and the "decline" is just last term's score.
+    has_trend_basis = has_results and features.has_previous_term
+
+    if not has_results and not has_activity:
+        risk_factors.append(
+            "No marks entered for this term yet - this reading is based on "
+            "attendance alone"
+        )
+
     # ── RULE 1: Critical Attendance ───────────────────────────────
     # Student(?s) ∧ hasAttendanceRate(?s, ?r) ∧ lessThan(?r, 70)
     # → hasRisk(?s, HighRisk) ∧ requiresIntervention(?s, ParentMeeting)
-    if features.attendance_rate < t["attendance_high_risk"]:
+    if has_attendance and features.attendance_rate < t["attendance_high_risk"]:
         risk_factors.append(
             f"Critical attendance rate: {features.attendance_rate:.1f}% "
             f"— below {t['attendance_high_risk']}% minimum threshold"
@@ -189,7 +209,7 @@ def apply_swrl_rules(
     # ── RULE 2: Low Attendance ────────────────────────────────────
     # Student(?s) ∧ hasAttendanceRate(?s, ?r) ∧ lessThan(?r, 80)
     # → hasRisk(?s, MediumRisk) ∧ requiresIntervention(?s, AttendanceMonitoring)
-    elif features.attendance_rate < t["attendance_medium_risk"]:
+    elif has_attendance and features.attendance_rate < t["attendance_medium_risk"]:
         risk_factors.append(
             f"Low attendance rate: {features.attendance_rate:.1f}% "
             f"— below {t['attendance_medium_risk']}% threshold"
@@ -197,7 +217,7 @@ def apply_swrl_rules(
         interventions.add("AttendanceMonitoring")
         risk_points += 2.0
     
-    elif features.attendance_rate < t["attendance_low_risk"]:
+    elif has_attendance and features.attendance_rate < t["attendance_low_risk"]:
         risk_factors.append(
             f"Attendance below expected: {features.attendance_rate:.1f}%"
         )
@@ -206,7 +226,7 @@ def apply_swrl_rules(
     # ── RULE 3: Critical Academic Performance ─────────────────────
     # Student(?s) ∧ hasAverageFinalScore(?s, ?sc) ∧ lessThan(?sc, 40)
     # → hasRisk(?s, HighRisk) ∧ requiresIntervention(?s, AcademicTutoring)
-    if features.average_final_score < t["score_high_risk"]:
+    if has_results and features.average_final_score < t["score_high_risk"]:
         risk_factors.append(
             f"Critical academic performance: "
             f"{features.average_final_score:.1f}% average final score"
@@ -215,7 +235,7 @@ def apply_swrl_rules(
         interventions.add("SubjectSupport")
         risk_points += 3.0
     
-    elif features.average_final_score < t["score_medium_risk"]:
+    elif has_results and features.average_final_score < t["score_medium_risk"]:
         risk_factors.append(
             f"Below average academic performance: "
             f"{features.average_final_score:.1f}% average"
@@ -223,7 +243,7 @@ def apply_swrl_rules(
         interventions.add("AcademicTutoring")
         risk_points += 2.0
     
-    elif features.average_final_score < t["score_low_risk"]:
+    elif has_results and features.average_final_score < t["score_low_risk"]:
         risk_factors.append(
             f"Performance below expected level: "
             f"{features.average_final_score:.1f}% average"
@@ -233,7 +253,7 @@ def apply_swrl_rules(
     # ── RULE 4: Assessment Activity ─────────────────────────────
     # Student(?s) ∧ hasAssessmentActivityRate(?s, ?cr) ∧ lessThan(?cr, 60)
     # → hasRisk(?s, MediumRisk) ∧ requiresIntervention(?s, ParentMeeting)
-    if features.assignment_completion_rate < t["completion_high_risk"]:
+    if has_activity and features.assignment_completion_rate < t["completion_high_risk"]:
         risk_factors.append(
             f"Very low assessment activity: "
             f"{features.assignment_completion_rate:.1f}% of expected assessments completed"
@@ -241,7 +261,7 @@ def apply_swrl_rules(
         interventions.add("ParentMeeting")
         risk_points += 2.0
     
-    elif features.assignment_completion_rate < t["completion_medium_risk"]:
+    elif has_activity and features.assignment_completion_rate < t["completion_medium_risk"]:
         risk_factors.append(
             f"Low assessment activity rate: "
             f"{features.assignment_completion_rate:.1f}%"
@@ -251,7 +271,7 @@ def apply_swrl_rules(
     # ── RULE 5: Multiple Subject Failures ─────────────────────────
     # Student(?s) ∧ hasSubjectFailureCount(?s, ?fc) ∧ greaterThan(?fc, 2)
     # → hasRisk(?s, HighRisk) ∧ requiresIntervention(?s, SubjectSupport)
-    if features.subject_failure_count >= t["failure_count_high"]:
+    if has_results and features.subject_failure_count >= t["failure_count_high"]:
         risk_factors.append(
             f"Failing {features.subject_failure_count} subjects "
             f"with scores below 40%"
@@ -260,7 +280,7 @@ def apply_swrl_rules(
         interventions.add("AcademicTutoring")
         risk_points += 2.0
     
-    elif features.subject_failure_count >= t["failure_count_medium"]:
+    elif has_results and features.subject_failure_count >= t["failure_count_medium"]:
         risk_factors.append(
             f"At risk of failing {features.subject_failure_count} subjects"
         )
@@ -270,7 +290,7 @@ def apply_swrl_rules(
     # ── RULE 6: Score Decline Trend ───────────────────────────────
     # Student(?s) ∧ hasScoreTrend(?s, ?st) ∧ lessThan(?st, -10)
     # → hasRisk(?s, MediumRisk) ∧ requiresIntervention(?s, AcademicTutoring)
-    if features.score_trend < t["score_decline_threshold"]:
+    if has_trend_basis and features.score_trend < t["score_decline_threshold"]:
         risk_factors.append(
             f"Significant academic decline from previous term: "
             f"{features.score_trend:+.1f}% change"
@@ -278,7 +298,7 @@ def apply_swrl_rules(
         interventions.add("AcademicTutoring")
         risk_points += 2.0
     
-    elif features.score_trend < 0:
+    elif has_trend_basis and features.score_trend < 0:
         risk_factors.append(
             f"Slight academic decline from previous term: "
             f"{features.score_trend:+.1f}% change"
@@ -288,7 +308,7 @@ def apply_swrl_rules(
     # ── RULE 7: Attendance Decline Trend ──────────────────────────
     # Student(?s) ∧ hasAttendanceTrend(?s, ?at) ∧ lessThan(?at, -10)
     # → hasRisk(?s, MediumRisk) ∧ requiresIntervention(?s, AttendanceMonitoring)
-    if features.attendance_trend < t["attendance_decline_threshold"]:
+    if has_attendance and features.has_previous_term and features.attendance_trend < t["attendance_decline_threshold"]:
         risk_factors.append(
             f"Attendance significantly declining: "
             f"{features.attendance_trend:+.1f}% from last term"
@@ -302,7 +322,8 @@ def apply_swrl_rules(
     # ∧ hasAverageFinalScore(?s, ?sc) ∧ lessThan(?sc, 50)
     # → hasRisk(?s, HighRisk) ∧ requiresIntervention(?s, ParentMeeting)
     # ∧ requiresIntervention(?s, CounsellingSession)
-    if (features.attendance_rate < t["attendance_medium_risk"] and
+    if (has_attendance and has_results and
+            features.attendance_rate < t["attendance_medium_risk"] and
             features.average_final_score < t["score_medium_risk"]):
         risk_factors.append(
             "Combined attendance and academic risk detected"
