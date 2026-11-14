@@ -61,9 +61,16 @@ async def extract_student_features(
         FROM students s
         JOIN classes c ON s.class_id = c.id
         LEFT JOIN LATERAL (
+            -- A LATE day counts as half a day present. Counting it as absent
+            -- made a pupil who is always late read 0% and HIGH risk.
+            -- get_previous_term_scores uses the same rule so trends compare
+            -- like with like.
             SELECT
                 ROUND(
-                    100.0 * COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END) /
+                    100.0 * (
+                        COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END)
+                        + 0.5 * COUNT(DISTINCT CASE WHEN a.status = 'LATE' THEN a.id END)
+                    ) /
                     NULLIF(COUNT(DISTINCT a.id), 0)
                 , 2) as attendance_rate,
                 COUNT(DISTINCT a.id) as days_recorded
@@ -258,7 +265,11 @@ async def get_previous_term_scores(
             AVG(r.final_score) as avg_score,
             COALESCE(
                 ROUND(
-                    100.0 * COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END) /
+                    -- LATE counts as half a day, as in extract_student_features.
+                    100.0 * (
+                        COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END)
+                        + 0.5 * COUNT(DISTINCT CASE WHEN a.status = 'LATE' THEN a.id END)
+                    ) /
                     NULLIF(COUNT(DISTINCT a.id), 0)
                 , 2),
                 0
