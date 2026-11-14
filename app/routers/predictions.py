@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.auth import require_api_key
 from app.database import get_db
 from app.services.feature_extraction import extract_student_features
 from app.ml.risk_predictor import RiskPredictor
@@ -9,7 +10,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/predictions", tags=["predictions"])
+# Every prediction route needs the shared key; see app/auth.py.
+router = APIRouter(
+    prefix="/predictions",
+    tags=["predictions"],
+    dependencies=[Depends(require_api_key)],
+)
 predictor = RiskPredictor()
 
 @router.get("/school/{school_id}", response_model=SchoolRiskSummary)
