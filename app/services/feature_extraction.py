@@ -9,14 +9,21 @@ async def extract_student_features(
     school_id: str,
     session: str,
     term: str,
-    class_id: Optional[str] = None
+    class_id: Optional[str] = None,
+    student_id: Optional[str] = None,
 ) -> list[StudentFeatures]:
     """
     Extract features for all students in a school for a given session/term.
     Queries MSparq's existing PostgreSQL tables directly.
+
+    Pass student_id to extract one pupil. The single-pupil endpoint used to
+    extract the whole school and keep one row, so every parent opening their
+    child's risk card ran the school-wide query - slow enough on a large school
+    to overrun the app's ten second wait.
     """
 
     class_filter = "AND s.class_id = :class_id" if class_id else ""
+    student_filter = "AND s.id = :student_id" if student_id else ""
 
     query = text(f"""
         SELECT
@@ -152,6 +159,7 @@ async def extract_student_features(
         WHERE s.school_id = :school_id
             AND s.archived_at IS NULL
             {class_filter}
+            {student_filter}
         ORDER BY c.name, s.last_name
     """)
     params = {
@@ -161,6 +169,8 @@ async def extract_student_features(
     }
     if class_id:
         params["class_id"] = class_id
+    if student_id:
+        params["student_id"] = student_id
 
     result = await db.execute(query, params)
     rows = result.fetchall()
@@ -169,7 +179,9 @@ async def extract_student_features(
         return []
 
     # Calculate trends by comparing to previous term
-    prev_term_map = await get_previous_term_scores(db, school_id, session, term)
+    prev_term_map = await get_previous_term_scores(
+        db, school_id, session, term, student_id
+    )
 
     features = []
     for row in rows:
@@ -213,9 +225,11 @@ async def get_previous_term_scores(
     db: AsyncSession,
     school_id: str,
     session: str,
-    term: str
+    term: str,
+    student_id: Optional[str] = None,
 ) -> dict:
-    """Get previous term's scores for trend calculation."""
+    """Get previous term's scores for trend calculation. student_id narrows
+    it to one pupil."""
 
     term_order = {
         "First Term": 1,
@@ -236,7 +250,9 @@ async def get_previous_term_scores(
         prev_term = "Second Term"
         prev_session = session
 
-    query = text("""
+    student_filter = "AND r.student_id = :student_id" if student_id else ""
+
+    query = text(f"""
         SELECT
             r.student_id,
             AVG(r.final_score) as avg_score,
@@ -255,14 +271,19 @@ async def get_previous_term_scores(
         WHERE r.school_id = :school_id
             AND r.session = :prev_session
             AND r.term = :prev_term
+            {student_filter}
         GROUP BY r.student_id
     """)
 
-    result = await db.execute(query, {
+    params = {
         "school_id": school_id,
         "prev_session": prev_session,
-        "prev_term": prev_term
-    })
+        "prev_term": prev_term,
+    }
+    if student_id:
+        params["student_id"] = student_id
+
+    result = await db.execute(query, params)
 
     rows = result.fetchall()
     return {
