@@ -77,8 +77,9 @@ async def get_student_prediction(
 ):
     """Get risk prediction for a single student."""
     try:
+        # Only this pupil's rows, not the whole school's.
         features_list = await extract_student_features(
-            db, school_id, session, term
+            db, school_id, session, term, student_id=student_id
         )
 
         student_features = next(
