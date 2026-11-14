@@ -68,9 +68,9 @@ async def get_school_predictions(
             predictions=at_risk
         )
 
-    except Exception as e:
+    except Exception:
         logger.exception("School prediction failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Prediction failed.")
 
 
 @router.get("/student/{student_id}", response_model=RiskPrediction)
@@ -103,6 +103,6 @@ async def get_student_prediction(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Student prediction failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Prediction failed.")
