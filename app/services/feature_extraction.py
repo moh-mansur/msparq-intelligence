@@ -71,9 +71,12 @@ async def extract_student_features(
                         COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END)
                         + 0.5 * COUNT(DISTINCT CASE WHEN a.status = 'LATE' THEN a.id END)
                     ) /
-                    NULLIF(COUNT(DISTINCT a.id), 0)
+                    -- EXCUSED days (away with permission) are left out, as in
+                    -- the school app. ::text works before and after the enum
+                    -- gains the value.
+                    NULLIF(COUNT(DISTINCT CASE WHEN a.status::text <> 'EXCUSED' THEN a.id END), 0)
                 , 2) as attendance_rate,
-                COUNT(DISTINCT a.id) as days_recorded
+                COUNT(DISTINCT CASE WHEN a.status::text <> 'EXCUSED' THEN a.id END) as days_recorded
             FROM attendance a
             WHERE a.student_id = s.id
                 AND a.school_id = :school_id
@@ -270,7 +273,8 @@ async def get_previous_term_scores(
                         COUNT(DISTINCT CASE WHEN a.status = 'PRESENT' THEN a.id END)
                         + 0.5 * COUNT(DISTINCT CASE WHEN a.status = 'LATE' THEN a.id END)
                     ) /
-                    NULLIF(COUNT(DISTINCT a.id), 0)
+                    -- EXCUSED days are left out, as in extract_student_features.
+                    NULLIF(COUNT(DISTINCT CASE WHEN a.status::text <> 'EXCUSED' THEN a.id END), 0)
                 , 2),
                 0
             ) as attendance_rate
